@@ -78,8 +78,6 @@ dmypy.json
 *.env
 
 # Data, models, artifacts
-*.db
-*.pkl
 *.npy
 *.gz
 *.dll
