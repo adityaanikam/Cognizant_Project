@@ -10,4 +10,4 @@ psycopg2-binary==2.9.9  # For PostgreSQL connection
 python-dotenv==1.0.0    # For reading .env file
 setuptools>=65.0.0
 wheel>=0.38.0
-pandas>=2.2.3
+
