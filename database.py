@@ -103,6 +103,10 @@ class CibilDatabase:
 
     def load_csv_to_database(self, csv_file_path: str = 'cibil_database.csv'):
         """Load CIBIL data from CSV to database"""
+        # In load_csv_to_database method, ensure proper formatting:
+        data_tuples = [(str(row['CIBIL ID']).strip().zfill(9), int(row['CIBIL Score']))
+               for _, row in df.iterrows()]
+
         try:
             df = pd.read_csv(csv_file_path)
             logger.info(f"Loading {len(df)} records from CSV file")
