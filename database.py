@@ -16,13 +16,15 @@ class CibilDatabase:
         """Initialize database connection"""
         # For production, default to PostgreSQL unless explicitly set to use SQLite
         self.use_sqlite = os.getenv('USE_SQLITE', 'false').lower() == 'true'
+        self._initialized = False
         
         if self.use_sqlite:
             import sqlite3
             self.db_path = 'cibil_database.db'
             self.init_sqlite_db()
+            self._initialized = True
         else:
-            # Production PostgreSQL configuration
+            # Production PostgreSQL configuration - lazy initialization
             self.database_url = os.getenv('DATABASE_URL')
             if not self.database_url:
                 # Fallback to discrete env vars if provided
@@ -34,10 +36,18 @@ class CibilDatabase:
                 
                 if host and user and password and dbname:
                     self.database_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
-                else:
-                    raise ValueError("DATABASE_URL or individual DB credentials must be provided for PostgreSQL")
             
+            # Don't initialize PostgreSQL here - do it lazily when needed
+            if not self.database_url:
+                logger.warning("No DATABASE_URL found. PostgreSQL will be initialized when first accessed.")
+
+    def _ensure_postgres_initialized(self):
+        """Ensure PostgreSQL is initialized before use"""
+        if not self._initialized and not self.use_sqlite:
+            if not self.database_url:
+                raise ValueError("DATABASE_URL or individual DB credentials must be provided for PostgreSQL")
             self.init_postgres_db()
+            self._initialized = True
 
     def init_sqlite_db(self):
         """Initialize SQLite database for development"""
@@ -109,6 +119,7 @@ class CibilDatabase:
                 conn = sqlite3.connect(self.db_path)
                 conn.row_factory = sqlite3.Row
             else:
+                self._ensure_postgres_initialized()
                 conn = psycopg2.connect(self.database_url)
             yield conn
         except Exception as e:
@@ -176,7 +187,7 @@ class CibilDatabase:
                         data_tuples
                     )
                 else:
-                    # PostgreSQL version
+                    # Clear existing data
                     cursor.execute('DELETE FROM cibil_scores')
                     
                     # Prepare data with proper formatting

@@ -6,7 +6,7 @@ import joblib
 import numpy as np
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from database import cibil_db
 
 # --- INITIAL SETUP ---
@@ -203,7 +203,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Loan Recommendation API",
     description="Backend service for predicting loan eligibility and terms using CIBIL ID lookup.",
-    version="4.0.1",
+    version="4.0.2",
     lifespan=lifespan
 )
 
@@ -224,7 +224,8 @@ class LoanRequest(BaseModel):
     salary: int = Field(..., gt=0, description="Annual salary as an integer")
     cibil_id: str = Field(..., description="CIBIL ID for score lookup")
 
-    @validator('gender')
+    @field_validator('gender')
+    @classmethod
     def validate_gender(cls, v):
         allowed = ['Male', 'Female']
         v_title = v.strip().title()
@@ -232,21 +233,24 @@ class LoanRequest(BaseModel):
             raise ValueError(f'Gender must be one of {allowed}')
         return v_title
 
-    @validator('education')
+    @field_validator('education')
+    @classmethod
     def validate_education(cls, v):
         allowed = ['Postgraduate', 'Graduate', '12th Pass', '10th Pass', 'Phd', 'Diploma']
         if v not in allowed:
             raise ValueError(f'Education must be one of {allowed}')
         return v
 
-    @validator('employment')
+    @field_validator('employment')
+    @classmethod
     def validate_employment(cls, v):
         allowed = ['Self-Employed', 'Salaried', 'Government', 'Retired', 'Student']
         if v not in allowed:
             raise ValueError(f'Employment must be one of {allowed}')
         return v
 
-    @validator('property_type', 'marital_status')
+    @field_validator('property_type', 'marital_status')
+    @classmethod
     def normalize_text_inputs(cls, v):
         return v.strip().title()
 
@@ -263,7 +267,7 @@ class LoanResponse(BaseModel):
 # --- API ENDPOINTS ---
 @app.get("/", tags=["Health"])
 async def root():
-    return {"message": "Loan Recommendation API is running.", "version": "4.0.0"}
+    return {"message": "Loan Recommendation API is running.", "version": "4.0.2"}
 
 @app.get("/health", tags=["Health"])
 async def health_check():
