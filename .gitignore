@@ -80,7 +80,6 @@ dmypy.json
 # Data, models, artifacts
 *.db
 *.pkl
-*.csv
 *.npy
 *.gz
 *.dll
