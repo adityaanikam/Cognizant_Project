@@ -14,7 +14,7 @@ class CibilDatabase:
     def __init__(self):
         """Initialize database connection"""
         # For development/testing, you can use SQLite
-        self.use_sqlite = os.getenv('USE_SQLITE', 'true').lower() == 'true'
+        self.use_sqlite = os.getenv('USE_SQLITE', 'false').lower() == 'true'
         
         if self.use_sqlite:
             import sqlite3
