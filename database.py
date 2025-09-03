@@ -27,19 +27,8 @@ class CibilDatabase:
             # Production PostgreSQL configuration - lazy initialization
             self.database_url = os.getenv('DATABASE_URL')
             if not self.database_url:
-                # Fallback to discrete env vars if provided
-                host = os.getenv('DB_HOST')
-                user = os.getenv('DB_USER')
-                password = os.getenv('DB_PASSWORD')
-                dbname = os.getenv('DB_NAME')
-                port = os.getenv('DB_PORT', '5432')
-                
-                if host and user and password and dbname:
-                    self.database_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
-            
-            # Don't initialize PostgreSQL here - do it lazily when needed
-            if not self.database_url:
-                logger.warning("No DATABASE_URL found. PostgreSQL will be initialized when first accessed.")
+                logger.error("DATABASE_URL environment variable is required for PostgreSQL")
+                raise ValueError("DATABASE_URL environment variable is required for PostgreSQL")
 
     def _ensure_postgres_initialized(self):
         """Ensure PostgreSQL is initialized before use"""
@@ -260,7 +249,7 @@ class CibilDatabase:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM cibil_scores LIMIT 1')
+                cursor.execute('SELECT COUNT(*) FROM cibil_scores')
                 record_count = cursor.fetchone()[0]
                 
                 return {

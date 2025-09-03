@@ -32,14 +32,12 @@ def load_ml_models():
         for name, file in model_files.items():
             if os.path.exists(file):
                 models[name] = joblib.load(file)
-                logger.info(f"Loaded model {name} from {file}.")
             else:
                 logger.error(f"Model file {file} not found.")
                 raise FileNotFoundError(f"Model file {file} not found")
 
         if os.path.exists('label_encoders.pkl'):
             label_encoders = joblib.load('label_encoders.pkl')
-            logger.info("Loaded label encoders successfully.")
         else:
             logger.error("Label encoders file not found.")
             raise FileNotFoundError("Label encoders file not found")
@@ -117,26 +115,40 @@ def generate_loan_recommendation(request: 'LoanRequest') -> Dict[str, Any]:
 # Application lifespan with startup and shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application startup and shutdown events."""
-    logger.info("Application startup: Loading ML models...")
-    load_ml_models()
+    logger.info("Application startup: Loading ML models and initializing database...")
+    try:
+        # Load ML models
+        load_ml_models()
+        
+        # Initialize database and load CIBIL data if needed
+        try:
+            # Check if database has data
+            test_score = cibil_db.get_cibil_score("227133320")  # Test with first ID from CSV
+            if test_score is None:
+                logger.info("Loading CIBIL data from CSV...")
+                cibil_db.load_csv_to_database('cibil_database.csv')
+        except Exception as e:
+            logger.warning(f"Could not load CIBIL data: {e}")
+        
+        logger.info("Application startup completed successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize application: {str(e)}")
+        raise
+    
     yield
     logger.info("Application shutdown.")
 
 # FastAPI app initialization
 app = FastAPI(
     title="Loan Recommendation API",
-    description="Backend service for predicting loan eligibility and terms.",
-    version="3.0.0",
+    description="Backend service for predicting loan eligibility and terms using CIBIL ID lookup.",
+    version="4.0.2",
     lifespan=lifespan
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
+    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
 # Pydantic Models
@@ -198,13 +210,66 @@ class LoanResponse(BaseModel):
     monthly_emi: float
     recommendations: List[str]
 
-# Endpoints
+# --- API ENDPOINTS ---
 @app.get("/", tags=["Health"])
 async def root():
-    return {"message": "Loan Recommendation API is running."}
+    return {"message": "Loan Recommendation API is running.", "version": "4.0.2"}
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """Detailed health check"""
+    return {
+        "status": "healthy",
+        "models_loaded": len(models) == 5,
+        "encoders_loaded": bool(label_encoders),
+        "database_connected": True
+    }
+
+@app.post("/validate-cibil", tags=["Validation"])
+async def validate_cibil_id(cibil_id: str):
+    """Validate CIBIL ID and return score"""
+    try:
+        # Validate CIBIL ID exists
+        is_valid = cibil_db.validate_cibil_id(cibil_id)
+        
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"CIBIL ID {cibil_id} not found in database"
+            )
+        
+        # Get CIBIL score
+        cibil_score = cibil_db.get_cibil_score(cibil_id)
+        
+        return {
+            "cibil_id": cibil_id,
+            "cibil_score": cibil_score,
+            "is_valid": True
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating CIBIL ID: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error validating CIBIL ID"
+        )
 
 @app.post("/predict", response_model=LoanResponse, tags=["Prediction"])
 async def predict_loan(request: LoanRequest):
+    """
+    Generate loan recommendation based on customer profile
+    
+    Uses CIBIL ID to lookup score from database and provides:
+    - Eligibility status
+    - Recommended product type  
+    - Optimal loan amount
+    - Tenure in years (with decimals)
+    - Interest rate
+    - Risk assessment
+    - Personalized recommendations
+    """
     try:
         recommendation = generate_loan_recommendation(request)
         return LoanResponse(**recommendation)
@@ -212,7 +277,21 @@ async def predict_loan(request: LoanRequest):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Prediction error: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred during prediction.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="An internal error occurred during prediction."
+        )
+
+@app.get("/categories", tags=["Info"])
+async def get_categories():
+    """Get all available categories for form dropdowns"""
+    return {
+        "gender": ["Male", "Female"],
+        "property_type": ["Rented", "Owned"],
+        "marital_status": ["Single", "Married", "Divorced"],
+        "education": ["Postgraduate", "Graduate", "12th Pass", "10th Pass", "Phd", "Diploma"],
+        "employment": ["Self-Employed", "Salaried", "Government", "Retired", "Student"]
+    }
 
 if __name__ == "__main__":
     import uvicorn
