@@ -60,25 +60,31 @@ class CibilDatabase:
             raise
 
     def init_postgres_db(self):
-        """Initialize PostgreSQL database schema in production"""
+    """Initialize PostgreSQL database schema in production"""
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
             with psycopg2.connect(self.database_url) as conn:
                 with conn.cursor() as cursor:
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS cibil_scores (
-                            id SERIAL PRIMARY KEY,
-                            cibil_id TEXT UNIQUE NOT NULL,
-                            cibil_score INTEGER NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            CONSTRAINT cibil_score_range CHECK (cibil_score >= 300 AND cibil_score <= 900)
-                        )
+                    CREATE TABLE IF NOT EXISTS cibil_scores (
+                        id SERIAL PRIMARY KEY,
+                        cibil_id TEXT UNIQUE NOT NULL,
+                        cibil_score INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT cibil_score_range CHECK (cibil_score >= 300 AND cibil_score <= 900)
+                    )
                     ''')
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_cibil_id ON cibil_scores(cibil_id)')
                     conn.commit()
-            logger.info("PostgreSQL database initialized successfully")
+                    logger.info("PostgreSQL database initialized successfully")
+                    return
         except Exception as e:
-            logger.error(f"Error initializing PostgreSQL database: {e}")
-            raise
+            logger.error(f"Database initialization attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(2)
+
 
     @contextmanager
     def get_connection(self):
