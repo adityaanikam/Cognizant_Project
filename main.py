@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Any, Optional, List
 import joblib
 import numpy as np
@@ -32,15 +32,19 @@ def load_ml_models():
         for name, file in model_files.items():
             if os.path.exists(file):
                 models[name] = joblib.load(file)
+                logger.info(f"Loaded model: {name}")
             else:
                 logger.error(f"Model file {file} not found.")
                 raise FileNotFoundError(f"Model file {file} not found")
 
         if os.path.exists('label_encoders.pkl'):
             label_encoders = joblib.load('label_encoders.pkl')
+            logger.info(f"Loaded label encoders: {list(label_encoders.keys())}")
         else:
             logger.error("Label encoders file not found.")
             raise FileNotFoundError("Label encoders file not found")
+
+        logger.info("All ML models and encoders loaded successfully.")
 
     except Exception as e:
         logger.error(f"Error loading ML models: {e}")
@@ -50,13 +54,12 @@ def load_ml_models():
 def encode_categorical_features(request: 'LoanRequest') -> tuple:
     """Encode categorical features using the loaded label encoders."""
     try:
-        loan_type_enc = label_encoders['Loan Type'].transform([request.loan_type])[0]
         gender_enc = label_encoders['Gender'].transform([request.gender])[0]
         marital_enc = label_encoders['Marital Status'].transform([request.marital_status])[0]
         property_enc = label_encoders['Type of Property (Rented/Owned)'].transform([request.property_type])[0]
         education_enc = label_encoders['Education level'].transform([request.education])[0]
         employment_enc = label_encoders['Employment Status'].transform([request.employment])[0]
-        return loan_type_enc, gender_enc, marital_enc, property_enc, education_enc, employment_enc
+        return gender_enc, marital_enc, property_enc, education_enc, employment_enc
     except KeyError as e:
         logger.error(f"Categorical value not seen during training: {e}")
         raise ValueError(f"The value provided for {e} is not a valid category.")
@@ -64,12 +67,12 @@ def encode_categorical_features(request: 'LoanRequest') -> tuple:
 # Generate loan recommendation
 def generate_loan_recommendation(request: 'LoanRequest') -> Dict[str, Any]:
     """Generate a full loan recommendation based on user profile."""
-    loan_type_enc, gender_enc, marital_enc, property_enc, education_enc, employment_enc = encode_categorical_features(request)
+    gender_enc, marital_enc, property_enc, education_enc, employment_enc = encode_categorical_features(request)
     
     base_profile = np.array([[  
         request.age, gender_enc, marital_enc, property_enc,
         education_enc, employment_enc, request.experience, 
-        request.salary, request.cibil_score, loan_type_enc
+        request.salary, request.cibil_score
     ]])
 
     eligibility = models['eligibility'].predict(base_profile)[0]
@@ -119,17 +122,6 @@ async def lifespan(app: FastAPI):
     try:
         # Load ML models
         load_ml_models()
-        
-        # Initialize database and load CIBIL data if needed
-        try:
-            # Check if database has data
-            test_score = cibil_db.get_cibil_score("227133320")  # Test with first ID from CSV
-            if test_score is None:
-                logger.info("Loading CIBIL data from CSV...")
-                cibil_db.load_csv_to_database('cibil_database.csv')
-        except Exception as e:
-            logger.warning(f"Could not load CIBIL data: {e}")
-        
         logger.info("Application startup completed successfully")
     except Exception as e:
         logger.error(f"Failed to initialize application: {str(e)}")
@@ -141,64 +133,62 @@ async def lifespan(app: FastAPI):
 # FastAPI app initialization
 app = FastAPI(
     title="Loan Recommendation API",
-    description="Backend service for predicting loan eligibility and terms using CIBIL ID lookup.",
-    version="4.0.2",
+    description="Backend service for predicting loan eligibility and terms using ML models.",
+    version="4.0.3",
     lifespan=lifespan
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Pydantic Models
 class LoanRequest(BaseModel):
-    loan_type: str
     age: int = Field(..., ge=18, le=80, description="Age in years (18-80)")
-    gender: str
-    property_type: str
-    marital_status: str
-    education: str
-    employment: str
+    gender: str = Field(..., description="Gender: Male/Female")
+    property_type: str = Field(..., description="Property Type: Rented/Owned")
+    marital_status: str = Field(..., description="Marital Status: Single/Married/Divorced")
+    education: str = Field(..., description="Education level")
+    employment: str = Field(..., description="Employment status")
     experience: int = Field(..., ge=0, description="Work experience in years")
     salary: int = Field(..., gt=0, description="Annual salary as an integer")
     cibil_score: int = Field(..., ge=300, le=900, description="CIBIL score (300-900)")
 
-    @validator('loan_type')
-    def validate_loan_type(cls, v):
-        allowed = ['Personal Loan', 'Credit Card Loan']
-        v_title = v.strip().title()
-        if v_title not in allowed:
-            raise ValueError(f'Loan Type must be one of {allowed}')
-        return v_title
-
-    @validator('gender')
+    @field_validator('gender')
+    @classmethod
     def validate_gender(cls, v):
         allowed = ['Male', 'Female']
-        v_title = v.strip().title()
+        v_title = v.strip().title() if isinstance(v, str) else v
         if v_title not in allowed:
             raise ValueError(f'Gender must be one of {allowed}')
         return v_title
 
-    @validator('education')
+    @field_validator('education')
+    @classmethod
     def validate_education(cls, v):
         allowed = ['Postgraduate', 'Graduate', '12th Pass', '10th Pass', 'Phd', 'Diploma']
-        v_title = v.strip().title() if isinstance(v,str) else v
+        v_title = v.strip().title() if isinstance(v, str) else v
         if v_title not in allowed:
             raise ValueError(f'Education must be one of {allowed}')
         return v_title
 
-    @validator('employment')
+    @field_validator('employment')
+    @classmethod
     def validate_employment(cls, v):
         allowed = ['Self-Employed', 'Salaried', 'Government', 'Retired', 'Student']
-        v_title = v.strip().title() if isinstance(v,str) else v
+        v_title = v.strip().title() if isinstance(v, str) else v
         if v_title not in allowed:
             raise ValueError(f'Employment must be one of {allowed}')
         return v_title
 
-    @validator('property_type', 'marital_status')
+    @field_validator('property_type', 'marital_status')
+    @classmethod
     def normalize_text_inputs(cls, v):
-        return v.strip().title() if isinstance(v,str) else v
+        return v.strip().title() if isinstance(v, str) else v
 
 class LoanResponse(BaseModel):
     eligibility_status: str
@@ -210,10 +200,10 @@ class LoanResponse(BaseModel):
     monthly_emi: float
     recommendations: List[str]
 
-# --- API ENDPOINTS ---
+# API Endpoints
 @app.get("/", tags=["Health"])
 async def root():
-    return {"message": "Loan Recommendation API is running.", "version": "4.0.2"}
+    return {"message": "Loan Recommendation API is running.", "version": "4.0.3"}
 
 @app.get("/health", tags=["Health"])
 async def health_check():
@@ -222,53 +212,13 @@ async def health_check():
         "status": "healthy",
         "models_loaded": len(models) == 5,
         "encoders_loaded": bool(label_encoders),
-        "database_connected": True
+        "available_encoders": list(label_encoders.keys()) if label_encoders else []
     }
-
-@app.post("/validate-cibil", tags=["Validation"])
-async def validate_cibil_id(cibil_id: str):
-    """Validate CIBIL ID and return score"""
-    try:
-        # Validate CIBIL ID exists
-        is_valid = cibil_db.validate_cibil_id(cibil_id)
-        
-        if not is_valid:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"CIBIL ID {cibil_id} not found in database"
-            )
-        
-        # Get CIBIL score
-        cibil_score = cibil_db.get_cibil_score(cibil_id)
-        
-        return {
-            "cibil_id": cibil_id,
-            "cibil_score": cibil_score,
-            "is_valid": True
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error validating CIBIL ID: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error validating CIBIL ID"
-        )
 
 @app.post("/predict", response_model=LoanResponse, tags=["Prediction"])
 async def predict_loan(request: LoanRequest):
     """
     Generate loan recommendation based on customer profile
-    
-    Uses CIBIL ID to lookup score from database and provides:
-    - Eligibility status
-    - Recommended product type  
-    - Optimal loan amount
-    - Tenure in years (with decimals)
-    - Interest rate
-    - Risk assessment
-    - Personalized recommendations
     """
     try:
         recommendation = generate_loan_recommendation(request)

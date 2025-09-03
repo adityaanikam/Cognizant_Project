@@ -16,6 +16,7 @@ RUN apt-get update \
         python3-dev \
         libpq-dev \
         curl \
+        tree \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,8 +27,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code and ML models
 COPY . .
+
+# Debug: List all files to ensure ML models are copied
+RUN echo "=== Files in /app ===" && ls -la /app
+RUN echo "=== ML Model files ===" && ls -la *.pkl || echo "No .pkl files found"
+RUN echo "=== Python files ===" && ls -la *.py
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser \

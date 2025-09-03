@@ -54,7 +54,6 @@ Thumbs.db
 *.db
 *.sqlite3
 *.csv
-*.pkl
 logs/
 temp/
 .env.local

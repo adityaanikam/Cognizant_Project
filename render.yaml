@@ -11,8 +11,3 @@ services:
       - key: PORT
         value: "8000"
     healthCheckPath: /health
-
-databases:
-  - name: loan-db
-    databaseName: cogni_ml
-    plan: free
